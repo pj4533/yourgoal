@@ -1,11 +1,10 @@
 # yourgoal
 
-Command line app to accomplish simple tasks using AI
+Testing to see if LLMs can create executable code, and how much human intervention is actually needed.
 
 ### Notes
 
-* Mac only
-* Command line only
+* Quick and simple, didn't spend a ton of time on architecture
 
 ### Developer Commands
 
