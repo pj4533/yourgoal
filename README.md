@@ -5,6 +5,7 @@ Testing to see if LLMs can create executable code, and how much human interventi
 ### Notes
 
 * Quick and simple, didn't spend a ton of time on architecture
+* Don't be stupid, if you tell it to do destructive/dangerous stuff it will
 
 ### Developer Commands
 
