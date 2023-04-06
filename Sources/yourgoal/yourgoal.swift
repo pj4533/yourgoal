@@ -84,7 +84,60 @@ struct YourGoal: AsyncParsableCommand {
             print("ERROR: \(error)")
         }
     }
-    
+
+    // this too, i know.
+    func getContext(withQuery query: String) async -> [String] {
+        let queryEmbedding = await getADAEmbedding(withText: query)
+        
+        struct PineconeQuery: Codable {
+            var vector: [Float]
+            var includeMetadata: Bool
+            var topK: Int
+        }
+        
+        struct PineconeMatch: Codable {
+            var id: String
+            var score: Float
+            var metadata: VectorMetadata
+        }
+        
+        struct ResponseData: Codable {
+            let matches: [PineconeMatch]
+        }
+        
+        let query = PineconeQuery(vector: queryEmbedding, includeMetadata: true, topK: 5)
+        do {
+            if let url = URL(string: "https://\(pineconeBaseURL)/query") {
+                var request = URLRequest(url: url)
+                request.httpMethod = "POST"
+                request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+                request.setValue("application/json", forHTTPHeaderField: "accept")
+                request.setValue(pineconeAPIKey, forHTTPHeaderField: "Api-Key")
+
+                let encoder = JSONEncoder()
+                let jsonData = try encoder.encode(query)
+                request.httpBody = jsonData
+                
+                let (data, _) = try await URLSession.shared.data(for: request)
+                
+//                let jsonObject = try JSONSerialization.jsonObject(with: data, options: [])
+//                guard let jsonDictionary = jsonObject as? [String: Any] else {
+//                    throw NSError(domain: "InvalidJSON", code: 1, userInfo: [NSLocalizedDescriptionKey: "JSON is not a dictionary"])
+//                }
+//                print(jsonObject)
+                let decoder = JSONDecoder()
+                let responseData = try decoder.decode(ResponseData.self, from: data)
+                let sortedMatches = responseData.matches.sorted { match1, match2 in
+                    return match1.score > match2.score
+                }
+                return sortedMatches.map { $0.metadata.taskName }
+            }
+        } catch let error {
+            print("ERROR: \(error)")
+        }
+        return []
+    }
+
     func getADAEmbedding(withText text: String) async -> [Float] {
         let singleLineText = text.replacingOccurrences(of: "\n", with: " ")
         do {
@@ -170,12 +223,14 @@ struct YourGoal: AsyncParsableCommand {
         }
         return newTasks
     }
-    
+        
     func execute(task: Task, withContext context: String) async -> String {
+        let context = await getContext(withQuery: yourgoal).joined(separator: ", ")
         let messages: [OpenAIKit.Chat.Message] = [
-            .system(content: "You are an AI who performs one task based on the following objective: {objective}.\nTake into account these previously completed tasks: \(context)"),
+            .system(content: "You are an AI who performs one task based on the following objective: \(yourgoal).\nTake into account these previously completed tasks: \(context)"),
             .user(content: "Your task: \(task.name)")
         ]
+        print("EXECUTE MESSAGES: \(messages)")
         var contentResponse = ""
         do {
             let completion = try await openAIClient?.chats.create(
