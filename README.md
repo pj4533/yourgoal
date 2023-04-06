@@ -1,6 +1,11 @@
 # yourgoal
 
-Command line app to accomplish simple tasks using AI
+Swift implementation of [BabyAGI](https://github.com/yoheinakajima/babyagi)
+
+- [x] Hooked to OpenAI
+- [x] Basic task creation
+- [x] Creating embeddings
+- [ ] Saving to Pinecone
 
 ### Notes
 
