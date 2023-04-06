@@ -5,6 +5,17 @@ import OpenAIKit
 
 var openAIClient: OpenAIKit.Client?
 
+struct VectorMetadata: Codable {
+    var taskName: String
+    var result: String
+}
+
+struct Vector: Codable {
+    var id: String
+    var values: [Float]
+    var metadata: VectorMetadata
+}
+
 struct Task: Codable {
     var id: Int
     var name: String
@@ -27,9 +38,52 @@ struct YourGoal: AsyncParsableCommand {
     var organization: String {
         ProcessInfo.processInfo.environment["OPENAI_ORGANIZATION"]!
     }
+    
+    var pineconeAPIKey: String {
+        ProcessInfo.processInfo.environment["PINECONE_API_KEY"]!
+    }
+    
+    var pineconeBaseURL: String {
+        ProcessInfo.processInfo.environment["PINECONE_BASE_URL"]!
+    }
 
     var maxTaskId: Int = 0
     var taskList: [Task] = []
+    
+    // I know, I know, I'm going to refactor this. Geeze, relax.
+    func upsert(vector: Vector) async {
+        struct PineconeUpsert: Codable {
+            var vectors: [Vector]
+        }
+        
+        struct ResponseData: Codable {
+            let result: String
+        }
+        
+        let upsert = PineconeUpsert(vectors: [vector])
+        do {
+            if let url = URL(string: "https://\(pineconeBaseURL)/vectors/upsert") {
+                var request = URLRequest(url: url)
+                request.httpMethod = "POST"
+                request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+                request.setValue("application/json", forHTTPHeaderField: "accept")
+                request.setValue(pineconeAPIKey, forHTTPHeaderField: "Api-Key")
+
+                let encoder = JSONEncoder()
+                let jsonData = try encoder.encode(upsert)
+                request.httpBody = jsonData
+                
+                let (data, _) = try await URLSession.shared.data(for: request)
+                
+                let jsonObject = try JSONSerialization.jsonObject(with: data, options: [])
+                guard let jsonDictionary = jsonObject as? [String: Any] else {
+                    throw NSError(domain: "InvalidJSON", code: 1, userInfo: [NSLocalizedDescriptionKey: "JSON is not a dictionary"])
+                }
+            }
+        } catch let error {
+            print("ERROR: \(error)")
+        }
+    }
     
     func getADAEmbedding(withText text: String) async -> [Float] {
         let singleLineText = text.replacingOccurrences(of: "\n", with: " ")
@@ -179,12 +233,8 @@ struct YourGoal: AsyncParsableCommand {
                 // Step 2: Enrich result and store in Pinecone
                 let enrichedResult = result // not even sure what "enriched" is...need to look that up -- prob something in the original project?
                 let adaEmbedding = await getADAEmbedding(withText: enrichedResult)
-                /*
-                 enriched_result = {'data': result}  # This is where you should enrich the result if needed
-                 result_id = f"result_{task['task_id']}"
-                 vector = enriched_result['data']  # extract the actual result from the dictionary
-                 index.upsert([(result_id, get_ada_embedding(vector),{"task":task['task_name'],"result":result})])
-                 */
+                let vector = Vector(id: "\(task.id)", values: adaEmbedding, metadata: VectorMetadata(taskName: task.name, result: result))
+                await upsert(vector: vector)
                 
                 // Step 3: Create new tasks and reprioritize task list
                 let newTasks = await createNewTasks(withPreviousTask: task, previousResult: result)
