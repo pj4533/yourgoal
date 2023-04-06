@@ -2,6 +2,8 @@
 
 Swift implementation of [BabyAGI](https://github.com/yoheinakajima/babyagi)
 
+![example output](yourgoal1.gif)
+
 ### Notes
 
 * Don't be stupid
