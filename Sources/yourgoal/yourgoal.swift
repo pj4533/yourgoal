@@ -5,6 +5,11 @@ import OpenAIKit
 
 var openAIClient: OpenAIKit.Client?
 
+struct Task: Codable {
+    var id: Int
+    var name: String
+}
+
 @main
 struct YourGoal: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
@@ -23,136 +28,124 @@ struct YourGoal: AsyncParsableCommand {
         ProcessInfo.processInfo.environment["OPENAI_ORGANIZATION"]!
     }
 
-    var saving: Bool = false
-    var savefilename: String = ""
-    var runfilename: String = ""
-    var messages: [OpenAIKit.Chat.Message] = [
-        .system(content: "You are a coding assistant that only knows three commands: SAVE THIS, RUN THIS and DONE. You will be given a goal. Use your three commands to accomplish the goal. The command SAVE THIS should be followed by the name of a file to save and the codeblock to save into the file. The name of the file to save should always be 'output.swift' with no quotes. The command RUN THIS should be followed by the name of the file to run. I will tell you the output of the file when you tell me to run a file. You are not to tell me the output of running the file, wait for me to respond with the output of the file. The output of running the file will determine if you reached your goal. When you reach that goal, respond with the command DONE. Only respond with the command DONE if you have validated the running of the file accomplished the goal, by having me respond with the correct output. Limit commentary, only include the commands you know, SAVE THIS, RUN THIS or DONE. No other commentary, help, congratulations or any other form of commentary.")
-    ]
-
-    mutating func runfile() async {
-        print("DEBUG: Running \(runfilename)")
-        let task = Process()
-        task.executableURL = URL(fileURLWithPath: "/usr/bin/swift")
-        task.arguments = [runfilename]
-        let pipe = Pipe()
-        task.standardOutput = pipe
-        task.standardError = pipe
+    var maxTaskId: Int = 0
+    var taskList: [Task] = []
+    
+    func getADAEmbedding(withText text: String) async -> [Float] {
+        let singleLineText = text.replacingOccurrences(of: "\n", with: " ")
         do {
-            try task.run()
-            task.waitUntilExit()
-            let data = pipe.fileHandleForReading.readDataToEndOfFile()
-            if let output = String(data: data, encoding: .utf8) {
-                print("DEBUG: LOCAL OUTPUT\n\n\"\(output.trimmingCharacters(in: .whitespacesAndNewlines))\"\n")
-                if output.trimmingCharacters(in: .whitespacesAndNewlines) == "" {
-                    messages.append(.user(content: "There was no output from running the file."))
-                } else {
-                    messages.append(.user(content: output.trimmingCharacters(in: .whitespacesAndNewlines)))
-                }
-                await callCompletion()
-            } else {
-                print("DEBUG: NO LOCAL OUTPUT")
-            }
-        } catch {
-            print("DEBUG: Error running \(runfilename)")
+            let response = try await openAIClient?.embeddings.create(input: singleLineText)
+            return response?.data.first?.embedding ?? []
+        } catch let error {
+            print(error)
         }
+        return []
     }
-
-    func save(line: String) {        
-        print("DEBUG: Saving \(line.trimmingCharacters(in: .whitespacesAndNewlines))")
-        let fileManager = FileManager.default
-        let currentDirectory = fileManager.currentDirectoryPath
-        let path = "\(currentDirectory)/\(savefilename)"
-        // Check if the file exists
-        if FileManager.default.fileExists(atPath: path) {
-            // If the file exists, open it in append mode
-            if let fileHandle = FileHandle(forWritingAtPath: path) {
-                // Move file cursor to the end of the file
-                fileHandle.seekToEndOfFile()
-
-                // Convert the text to data
-                let data = line.data(using: .utf8)!
-                
-                // Write the data to the file
-                fileHandle.write(data)
-                
-                // Close the file handle
-                fileHandle.closeFile()            
-            } else {
-                print("Error opening file")
-            }
-        } else {
-            // If the file doesn't exist yet, create it and
-            // write the text to it
-            do {
-                try line.write(toFile: path, atomically: true, encoding: .utf8)
-            } catch {
-                print("Error writing to file: ", error)
-            }
-        }
-    }
-
-    mutating func parse(line: String) async {
-        if line.starts(with: "SAVE THIS") {
-            savefilename = "output.swift" //String(line.dropFirst(10)).replacingOccurrences(of: "\"", with: "").trimmingCharacters(in: .whitespacesAndNewlines)
-            print("DEBUG: Saving to '\(savefilename)'")
-            let fileManager = FileManager.default
-            if fileManager.fileExists(atPath: savefilename) {
-                print("DEBUG: File exists, removing...")
-                do {
-                    try fileManager.removeItem(at: URL(fileURLWithPath: savefilename))
-                    print("DEBUG: File removed successfully")
-                } catch {
-                    print("DEBUG: Error removing file: \(error)")
-                }
-            }            
-        } else if (line == "```") || (line == "```swift") || (line == "```Swift") {
-            if saving {
-                saving = false
-                print("DEBUG: Done saving to \(savefilename)")
-            } else {
-                saving = true
-            }
-        } else if line.starts(with: "RUN THIS") {
-            runfilename = savefilename
-            // runfilename = String(line.dropFirst(9)).replacingOccurrences(of: "\"", with: "").trimmingCharacters(in: .whitespacesAndNewlines)
-            print("DEBUG: Running \(runfilename)")
-            await runfile()
-        } else if line == "DONE" {
-            print("DEBUG: Done")
-        } else if saving {
-            save(line: "\(line)\n")
-        } else {
-            print("ERROR: UNKNOWN LINE - \(line)")
-        }
-    }
-
-    mutating func callCompletion() async {
-        print("DEBUG: Calling completion")
+    
+    func prioritizeTasks(withStartingTaskId startingTaskId: Int) async -> [Task] {
+        let messages: [OpenAIKit.Chat.Message] = [
+            .system(content: "You are an task prioritization AI tasked with cleaning the formatting of and reprioritizing tasks. Consider the ultimate objective of your team: \(yourgoal). Do not remove any tasks. Return the result as a numbered list, like:\n#. First task\n#. Second task\nStart the task list with number \(startingTaskId)."),
+            .user(content: "Clean, format and reprioritize these tasks: \(taskList.map({$0.name}).joined(separator: ", ")).")
+        ]
+        var prioritizedTasks: [Task] = []
         do {
             let completion = try await openAIClient?.chats.create(
                 model: Model.GPT3.gpt3_5Turbo,
-                messages: messages
+                messages: messages,
+                temperature: 0.5,
+                maxTokens: 100
             )
-            print("DEBUG: Got completion")
             switch completion?.choices.first?.message {
             case .assistant(let content):
-                messages.append(.assistant(content: content))
-                for line in content.split(separator: "\n") {
-                    await parse(line: String(line))
+                let lines = content.split(separator: "\n")
+                for line in lines {
+                    let taskComponents = line.components(separatedBy: ". ")
+                    if let taskIdString = taskComponents.first, let taskId = Int(taskIdString), let taskName = taskComponents.last {
+                        let newTask = Task(id: taskId, name: String(taskName))
+                        prioritizedTasks.append(newTask)
+                    }
                 }
             case .user(let content):
-                print("User: \(content)")
+                print("ERROR: got user response: \(content)")
             case .system(let content):
-                print("System: \(content)")
+                print("ERROR: got system response: \(content)")
             case .none:
-                print("No response")
+                print("ERROR: got no response")
             }
         } catch let error {
             print(error)
         }
+        return prioritizedTasks
     }
-
+    
+    mutating func createNewTasks(withPreviousTask previousTask: Task, previousResult: String) async -> [Task] {
+        // Tweaked these prompts to make it more easily parsable
+        let messages: [OpenAIKit.Chat.Message] = [
+            .system(content: "You are an task creation AI that uses the result of an execution agent to create new tasks with the following objective: \(yourgoal), The last completed task has the result: \(previousResult). This result was based on this task description: \(previousTask.name). These are incomplete tasks: \(taskList.map({$0.name}).joined(separator: ", "))."),
+            .user(content: "Based on the previous result, create new tasks to be completed by the AI system that do not overlap with incomplete tasks. Each line containing a task should start with '-- '")
+        ]
+        var newTasks: [Task] = []
+        do {
+            let completion = try await openAIClient?.chats.create(
+                model: Model.GPT3.gpt3_5Turbo,
+                messages: messages,
+                temperature: 0.5,
+                maxTokens: 100
+            )
+            switch completion?.choices.first?.message {
+            case .assistant(let content):
+                let newTaskStrings = content.split(separator: "\n")
+                for taskString in newTaskStrings {
+                    if taskString.hasPrefix("-- ") {
+                        maxTaskId += 1
+                        if let newTaskString = taskString.components(separatedBy: "-- ").last {
+                            let newTask = Task(id: maxTaskId, name: String(newTaskString))
+                            newTasks.append(newTask)
+                        }
+                    }
+                }
+            case .user(let content):
+                print("ERROR: got user response: \(content)")
+            case .system(let content):
+                print("ERROR: got system response: \(content)")
+            case .none:
+                print("ERROR: got no response")
+            }
+        } catch let error {
+            print(error)
+        }
+        return newTasks
+    }
+    
+    func execute(task: Task, withContext context: String) async -> String {
+        let messages: [OpenAIKit.Chat.Message] = [
+            .system(content: "You are an AI who performs one task based on the following objective: {objective}.\nTake into account these previously completed tasks: \(context)"),
+            .user(content: "Your task: \(task.name)")
+        ]
+        var contentResponse = ""
+        do {
+            let completion = try await openAIClient?.chats.create(
+                model: Model.GPT3.gpt3_5Turbo,
+                messages: messages,
+                temperature: 0.7,
+                maxTokens: 2000
+            )
+            switch completion?.choices.first?.message {
+            case .assistant(let content):
+                contentResponse = content
+            case .user(let content):
+                contentResponse = content
+            case .system(let content):
+                contentResponse = content
+            case .none:
+                contentResponse = ""
+            }
+        } catch let error {
+            print(error)
+        }
+        return contentResponse
+    }
+    
 	mutating func run() async throws {
         let httpClient = HTTPClient(eventLoopGroupProvider: .createNew)
         defer {
@@ -162,8 +155,42 @@ struct YourGoal: AsyncParsableCommand {
         let configuration = Configuration(apiKey: apiKey, organization: organization)
 
         openAIClient = OpenAIKit.Client(httpClient: httpClient, configuration: configuration)
-        messages.append(.user(content: "Your goal is to run a command line application to \(yourgoal) using the language Swift."))
+        maxTaskId += 1 // prob a way to make this more swifty so i can just ask for it
+        let firstTask = Task(id: maxTaskId, name: "Develop a task list")
+        taskList.append(firstTask)
+        
+        while taskList.count > 0 {
+            // Print the task list
+            print("\n****** TASK LIST ******\n")
+            for task in taskList {
+                print("\(task.id): \(task.name)")
+            }
+            
+            // Step 1: Pull the first task
+            if let task = taskList.first {
+                taskList.removeFirst()
+                print("\n****** NEXT TASK ******\n")
+                print("\(task.id): \(task.name)")
 
-        await callCompletion()
+                let result = await execute(task: task, withContext: "")
+                print("\n****** TASK RESULT ******\n")
+                print(result)
+                
+                // Step 2: Enrich result and store in Pinecone
+                let enrichedResult = result // not even sure what "enriched" is...need to look that up -- prob something in the original project?
+                let adaEmbedding = await getADAEmbedding(withText: enrichedResult)
+                /*
+                 enriched_result = {'data': result}  # This is where you should enrich the result if needed
+                 result_id = f"result_{task['task_id']}"
+                 vector = enriched_result['data']  # extract the actual result from the dictionary
+                 index.upsert([(result_id, get_ada_embedding(vector),{"task":task['task_name'],"result":result})])
+                 */
+                
+                // Step 3: Create new tasks and reprioritize task list
+                let newTasks = await createNewTasks(withPreviousTask: task, previousResult: result)
+                taskList.append(contentsOf: newTasks)
+                taskList = await prioritizeTasks(withStartingTaskId: task.id)
+            }
+        }
     }
 }
