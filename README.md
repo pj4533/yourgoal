@@ -9,8 +9,7 @@ Swift implementation of [BabyAGI](https://github.com/yoheinakajima/babyagi)
 
 ### Notes
 
-* Mac only
-* Command line only
+* Don't be stupid
 
 ### Developer Commands
 
