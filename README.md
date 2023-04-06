@@ -5,7 +5,8 @@ Swift implementation of [BabyAGI](https://github.com/yoheinakajima/babyagi)
 - [x] Hooked to OpenAI
 - [x] Basic task creation
 - [x] Creating embeddings
-- [ ] Saving to Pinecone
+- [x] Saving to Pinecone
+- [ ] Getting context from Pinecone
 
 ### Notes
 
