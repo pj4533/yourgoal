@@ -17,7 +17,7 @@ struct Vector: Codable {
 }
 
 struct Task: Codable {
-    var id: Int
+    var id: String
     var name: String
 }
 
@@ -47,7 +47,6 @@ struct YourGoal: AsyncParsableCommand {
         ProcessInfo.processInfo.environment["PINECONE_BASE_URL"]!
     }
 
-    var maxTaskId: Int = 0
     var taskList: [Task] = []
     
     // I know, I know, I'm going to refactor this. Geeze, relax.
@@ -73,12 +72,7 @@ struct YourGoal: AsyncParsableCommand {
                 let jsonData = try encoder.encode(upsert)
                 request.httpBody = jsonData
                 
-                let (data, _) = try await URLSession.shared.data(for: request)
-                
-                let jsonObject = try JSONSerialization.jsonObject(with: data, options: [])
-                guard let jsonDictionary = jsonObject as? [String: Any] else {
-                    throw NSError(domain: "InvalidJSON", code: 1, userInfo: [NSLocalizedDescriptionKey: "JSON is not a dictionary"])
-                }
+                let (_, _) = try await URLSession.shared.data(for: request)
             }
         } catch let error {
             print("ERROR: \(error)")
@@ -120,11 +114,6 @@ struct YourGoal: AsyncParsableCommand {
                 
                 let (data, _) = try await URLSession.shared.data(for: request)
                 
-//                let jsonObject = try JSONSerialization.jsonObject(with: data, options: [])
-//                guard let jsonDictionary = jsonObject as? [String: Any] else {
-//                    throw NSError(domain: "InvalidJSON", code: 1, userInfo: [NSLocalizedDescriptionKey: "JSON is not a dictionary"])
-//                }
-//                print(jsonObject)
                 let decoder = JSONDecoder()
                 let responseData = try decoder.decode(ResponseData.self, from: data)
                 let sortedMatches = responseData.matches.sorted { match1, match2 in
@@ -149,9 +138,9 @@ struct YourGoal: AsyncParsableCommand {
         return []
     }
     
-    func prioritizeTasks(withStartingTaskId startingTaskId: Int) async -> [Task] {
+    func prioritizeTasks() async -> [Task] {
         let messages: [OpenAIKit.Chat.Message] = [
-            .system(content: "You are an task prioritization AI tasked with cleaning the formatting of and reprioritizing tasks. Consider the ultimate objective of your team: \(yourgoal). Do not remove any tasks. Return the result as a numbered list, like:\n#. First task\n#. Second task\nStart the task list with number \(startingTaskId)."),
+            .system(content: "You are an task prioritization AI tasked with cleaning the formatting and reprioritizing tasks. Consider the ultimate objective of your team: \(yourgoal). Do not remove any tasks. Return the result as an ordered bulleted list using a '* ' at the beginning of each line."),
             .user(content: "Clean, format and reprioritize these tasks: \(taskList.map({$0.name}).joined(separator: ", ")).")
         ]
         var prioritizedTasks: [Task] = []
@@ -166,9 +155,9 @@ struct YourGoal: AsyncParsableCommand {
             case .assistant(let content):
                 let lines = content.split(separator: "\n")
                 for line in lines {
-                    let taskComponents = line.components(separatedBy: ". ")
-                    if let taskIdString = taskComponents.first, let taskId = Int(taskIdString), let taskName = taskComponents.last {
-                        let newTask = Task(id: taskId, name: String(taskName))
+                    let taskComponents = line.components(separatedBy: "* ")
+                    if let taskName = taskComponents.last {
+                        let newTask = Task(id: UUID().uuidString, name: String(taskName))
                         prioritizedTasks.append(newTask)
                     }
                 }
@@ -204,9 +193,8 @@ struct YourGoal: AsyncParsableCommand {
                 let newTaskStrings = content.split(separator: "\n")
                 for taskString in newTaskStrings {
                     if taskString.hasPrefix("-- ") {
-                        maxTaskId += 1
                         if let newTaskString = taskString.components(separatedBy: "-- ").last {
-                            let newTask = Task(id: maxTaskId, name: String(newTaskString))
+                            let newTask = Task(id: UUID().uuidString, name: String(newTaskString))
                             newTasks.append(newTask)
                         }
                     }
@@ -230,7 +218,6 @@ struct YourGoal: AsyncParsableCommand {
             .system(content: "You are an AI who performs one task based on the following objective: \(yourgoal).\nTake into account these previously completed tasks: \(context)"),
             .user(content: "Your task: \(task.name)")
         ]
-        print("EXECUTE MESSAGES: \(messages)")
         var contentResponse = ""
         do {
             let completion = try await openAIClient?.chats.create(
@@ -264,22 +251,21 @@ struct YourGoal: AsyncParsableCommand {
         let configuration = Configuration(apiKey: apiKey, organization: organization)
 
         openAIClient = OpenAIKit.Client(httpClient: httpClient, configuration: configuration)
-        maxTaskId += 1 // prob a way to make this more swifty so i can just ask for it
-        let firstTask = Task(id: maxTaskId, name: "Develop a task list")
+        let firstTask = Task(id: UUID().uuidString, name: "Develop a task list")
         taskList.append(firstTask)
         
         while taskList.count > 0 {
             // Print the task list
             print("\n****** TASK LIST ******\n")
             for task in taskList {
-                print("\(task.id): \(task.name)")
+                print("* \(task.name)")
             }
             
             // Step 1: Pull the first task
             if let task = taskList.first {
                 taskList.removeFirst()
                 print("\n****** NEXT TASK ******\n")
-                print("\(task.id): \(task.name)")
+                print("* \(task.name)")
 
                 let result = await execute(task: task, withContext: "")
                 print("\n****** TASK RESULT ******\n")
@@ -294,7 +280,7 @@ struct YourGoal: AsyncParsableCommand {
                 // Step 3: Create new tasks and reprioritize task list
                 let newTasks = await createNewTasks(withPreviousTask: task, previousResult: result)
                 taskList.append(contentsOf: newTasks)
-                taskList = await prioritizeTasks(withStartingTaskId: task.id)
+                taskList = await prioritizeTasks()
             }
         }
     }
