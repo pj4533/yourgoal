@@ -8,7 +8,6 @@ Swift implementation of [BabyAGI](https://github.com/yoheinakajima/babyagi)
 
 * Don't be stupid
 * Look in the .env.example for how to input keys
-* No color output yet
 
 ### Backstory
 
