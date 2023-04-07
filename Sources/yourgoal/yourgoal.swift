@@ -243,6 +243,9 @@ struct YourGoal: AsyncParsableCommand {
     }
     
 	mutating func run() async throws {
+        print("\u{001B}[96m\u{001B}[1m\n*****OBJECTIVE*****\n\u{001B}[0m\u{001B}[0m")
+        print("\(yourgoal)")
+
         let httpClient = HTTPClient(eventLoopGroupProvider: .createNew)
         defer {
             // it's important to shutdown the httpClient after all requests are done, even if one failed. See: https://github.com/swift-server/async-http-client
