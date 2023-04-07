@@ -256,7 +256,7 @@ struct YourGoal: AsyncParsableCommand {
         
         while taskList.count > 0 {
             // Print the task list
-            print("\n****** TASK LIST ******\n")
+            print("\u{001B}[95m\u{001B}[1m\n*****TASK LIST*****\n\u{001B}[0m\u{001B}[0m")
             for task in taskList {
                 print("* \(task.name)")
             }
@@ -264,11 +264,11 @@ struct YourGoal: AsyncParsableCommand {
             // Step 1: Pull the first task
             if let task = taskList.first {
                 taskList.removeFirst()
-                print("\n****** NEXT TASK ******\n")
+                print("\u{001B}[92m\u{001B}[1m\n*****NEXT TASK*****\n\u{001B}[0m\u{001B}[0m")
                 print("* \(task.name)")
 
                 let result = await execute(task: task, withContext: "")
-                print("\n****** TASK RESULT ******\n")
+                print("\u{001B}[93m\u{001B}[1m\n*****TASK RESULT*****\n\u{001B}[0m\u{001B}[0m")
                 print(result)
                 
                 // Step 2: Enrich result and store in Pinecone
