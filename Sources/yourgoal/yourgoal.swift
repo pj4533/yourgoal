@@ -31,6 +31,9 @@ struct YourGoal: AsyncParsableCommand {
     @Argument(help: "Your goal, in quotes")
     var yourgoal: String
 
+    @Flag(help: "Debug Mode")
+    var debug: Bool = false
+
     var apiKey: String {
         ProcessInfo.processInfo.environment["OPENAI_API_KEY"]!
     }
@@ -48,18 +51,39 @@ struct YourGoal: AsyncParsableCommand {
     }
 
     var taskList: [Task] = []
+    var namespaceUUID: String = UUID().uuidString
+        
+    func debugLog(_ messages: [OpenAIKit.Chat.Message]) {
+        if debug {
+            for message in messages {
+                switch message {
+                case .assistant(let content):
+                    print("(ASSISTANT) \(content)".brightWhite)
+                case .user(let content):
+                    print("(USER) \(content)".brightWhite)
+                case .system(let content):
+                    print("(SYSTEM) \(content)".brightWhite)
+                }
+            }
+        }
+    }
     
+    func debugLog(_ message: String) {
+        if debug { print("\(message)".brightWhite) }
+    }
+
     // I know, I know, I'm going to refactor this. Geeze, relax.
     func upsert(vector: Vector) async {
         struct PineconeUpsert: Codable {
             var vectors: [Vector]
+            var namespace: String
         }
         
         struct ResponseData: Codable {
             let result: String
         }
         
-        let upsert = PineconeUpsert(vectors: [vector])
+        let upsert = PineconeUpsert(vectors: [vector], namespace: namespaceUUID)
         do {
             if let url = URL(string: "https://\(pineconeBaseURL)/vectors/upsert") {
                 var request = URLRequest(url: url)
@@ -87,6 +111,7 @@ struct YourGoal: AsyncParsableCommand {
             var vector: [Float]
             var includeMetadata: Bool
             var topK: Int
+            var namespace: String
         }
         
         struct PineconeMatch: Codable {
@@ -99,7 +124,7 @@ struct YourGoal: AsyncParsableCommand {
             let matches: [PineconeMatch]
         }
         
-        let query = PineconeQuery(vector: queryEmbedding, includeMetadata: true, topK: 5)
+        let query = PineconeQuery(vector: queryEmbedding, includeMetadata: true, topK: 5, namespace: namespaceUUID)
         do {
             if let url = URL(string: "https://\(pineconeBaseURL)/query") {
                 var request = URLRequest(url: url)
@@ -118,6 +143,10 @@ struct YourGoal: AsyncParsableCommand {
                 let responseData = try decoder.decode(ResponseData.self, from: data)
                 let sortedMatches = responseData.matches.sorted { match1, match2 in
                     return match1.score > match2.score
+                }
+                debugLog("\n*****MATCHES*****\n")
+                for match in responseData.matches {
+                    debugLog("\(match.score): \(match.metadata.taskName)")
                 }
                 return sortedMatches.map { $0.metadata.taskName }
             }
@@ -143,13 +172,15 @@ struct YourGoal: AsyncParsableCommand {
             .system(content: "You are an task prioritization AI tasked with cleaning the formatting and reprioritizing tasks. Consider the ultimate objective of your team: \(yourgoal). Do not remove any tasks. Return the result as an ordered bulleted list using a '* ' at the beginning of each line."),
             .user(content: "Clean, format and reprioritize these tasks: \(taskList.map({$0.name}).joined(separator: ", ")).")
         ]
+        debugLog("\n****PRIORITIZE TASKS MESSAGE ARRAY****\n")
+        debugLog(messages)
         var prioritizedTasks: [Task] = []
         do {
             let completion = try await openAIClient?.chats.create(
                 model: Model.GPT3.gpt3_5Turbo,
                 messages: messages,
                 temperature: 0.5,
-                maxTokens: 100
+                maxTokens: 500
             )
             switch completion?.choices.first?.message {
             case .assistant(let content):
@@ -180,13 +211,15 @@ struct YourGoal: AsyncParsableCommand {
             .system(content: "You are an task creation AI that uses the result of an execution agent to create new tasks with the following objective: \(yourgoal), The last completed task has the result: \(previousResult). This result was based on this task description: \(previousTask.name). These are incomplete tasks: \(taskList.map({$0.name}).joined(separator: ", "))."),
             .user(content: "Based on the previous result, create new tasks to be completed by the AI system that do not overlap with incomplete tasks. Each line containing a task should start with '-- '")
         ]
+        debugLog("\n****CREATE NEW TASKS MESSAGE ARRAY****\n")
+        debugLog(messages)
         var newTasks: [Task] = []
         do {
             let completion = try await openAIClient?.chats.create(
                 model: Model.GPT3.gpt3_5Turbo,
                 messages: messages,
                 temperature: 0.5,
-                maxTokens: 100
+                maxTokens: 500
             )
             switch completion?.choices.first?.message {
             case .assistant(let content):
@@ -213,11 +246,14 @@ struct YourGoal: AsyncParsableCommand {
     }
         
     func execute(task: Task, withContext context: String) async -> String {
-        let context = await getContext(withQuery: yourgoal).joined(separator: ", ")
+        let contextArray = await getContext(withQuery: yourgoal)
+        let context = contextArray.map({ "\n* \($0)" }).joined()
         let messages: [OpenAIKit.Chat.Message] = [
             .system(content: "You are an AI who performs one task based on the following objective: \(yourgoal).\nTake into account these previously completed tasks: \(context)"),
             .user(content: "Your task: \(task.name)")
         ]
+        debugLog("\n****TASK EXECUTE MESSAGE ARRAY****\n")
+        debugLog(messages)
         var contentResponse = ""
         do {
             let completion = try await openAIClient?.chats.create(
@@ -243,7 +279,7 @@ struct YourGoal: AsyncParsableCommand {
     }
     
 	mutating func run() async throws {
-        print("\u{001B}[96m\u{001B}[1m\n*****OBJECTIVE*****\n\u{001B}[0m\u{001B}[0m")
+        print("\n*****OBJECTIVE*****\n".lightBlue)
         print("\(yourgoal)")
 
         let httpClient = HTTPClient(eventLoopGroupProvider: .createNew)
@@ -259,7 +295,7 @@ struct YourGoal: AsyncParsableCommand {
         
         while taskList.count > 0 {
             // Print the task list
-            print("\u{001B}[95m\u{001B}[1m\n*****TASK LIST*****\n\u{001B}[0m\u{001B}[0m")
+            print("\n*****TASK LIST*****\n".magenta)
             for task in taskList {
                 print("* \(task.name)")
             }
@@ -267,11 +303,11 @@ struct YourGoal: AsyncParsableCommand {
             // Step 1: Pull the first task
             if let task = taskList.first {
                 taskList.removeFirst()
-                print("\u{001B}[92m\u{001B}[1m\n*****NEXT TASK*****\n\u{001B}[0m\u{001B}[0m")
+                print("\n*****NEXT TASK*****\n".green)
                 print("* \(task.name)")
 
                 let result = await execute(task: task, withContext: "")
-                print("\u{001B}[93m\u{001B}[1m\n*****TASK RESULT*****\n\u{001B}[0m\u{001B}[0m")
+                print("\n*****TASK RESULT*****\n".yellow)
                 print(result)
                 
                 // Step 2: Enrich result and store in Pinecone
