@@ -110,7 +110,7 @@ struct YourGoal: AsyncParsableCommand {
     }
 
     // this too, i know.
-    func getContext(withQuery query: String) async -> [VectorMatch] {
+    func getContext(withQuery query: String) async -> String {
         let queryEmbedding = await getADAEmbedding(withText: query)
         
         struct PineconeQuery: Codable {
@@ -148,12 +148,13 @@ struct YourGoal: AsyncParsableCommand {
                 for match in responseData.matches {
                     debugLog("\(match.score): \(match.metadata.taskName)")
                 }
-                return sortedMatches
+                let context = sortedMatches.map({ "\n-----\n* TASK: \($0.metadata.taskName)\n* TASK RESULT: \($0.metadata.result)\n-----\n" }).joined()
+                return context
             }
         } catch let error {
             print("ERROR: \(error)")
         }
-        return []
+        return ""
     }
 
     func getADAEmbedding(withText text: String) async -> [Float] {
@@ -184,6 +185,8 @@ struct YourGoal: AsyncParsableCommand {
             )
             switch completion?.choices.first?.message {
             case .assistant(let content):
+                debugLog("\n****PRIORITIZE TASKS RESULT****\n")
+                debugLog(content)
                 let lines = content.split(separator: "\n")
                 for line in lines {
                     let taskComponents = line.components(separatedBy: "* ")
@@ -223,6 +226,8 @@ struct YourGoal: AsyncParsableCommand {
             )
             switch completion?.choices.first?.message {
             case .assistant(let content):
+                debugLog("\n****CREATE NEW TASKS RESULT****\n")
+                debugLog(content)
                 let newTaskStrings = content.split(separator: "\n")
                 for taskString in newTaskStrings {
                     if taskString.hasPrefix("-- ") {
@@ -244,10 +249,47 @@ struct YourGoal: AsyncParsableCommand {
         }
         return newTasks
     }
+    
+    // This is based on the AI-Functions concept, check it out here: https://github.com/Torantulino/AI-Functions  (also the core of AutoGPT)
+    //
+    // Obviously very specific to the 'is completed' case, so maybe break this out to a more generic callAIFunction() call like in AutoGPT
+    func isGoalCompleted() async -> Bool {
+        let context = await getContext(withQuery: yourgoal)
+        let messages: [OpenAIKit.Chat.Message] = [
+            .system(content: "You are now the following Swift function: ```// Determines if the goal is completed by analyzing the context\nfunc isGoalCompleted(goal: String, context: String) -> Bool```\n\nOnly respond with your `return` value."),
+            .user(content: "goal parameter: \(yourgoal), context parameter: \(context)")
+        ]
+        debugLog("\n****IS GOAL COMPLETE MESSAGE ARRAY****\n")
+        debugLog(messages)
+        var contentResponse = ""
+        do {
+            let completion = try await openAIClient?.chats.create(
+                model: Model.GPT3.gpt3_5Turbo,
+                messages: messages,
+                temperature: 0.0,
+                maxTokens: 100
+            )
+            switch completion?.choices.first?.message {
+            case .assistant(let content):
+                contentResponse = content
+            case .user(let content):
+                contentResponse = content
+            case .system(let content):
+                contentResponse = content
+            case .none:
+                contentResponse = ""
+            }
+        } catch let error {
+            print(error)
+        }
+        debugLog("\n****IS GOAL COMPLETE STRING RESULT****\n")
+        debugLog("\(contentResponse)")
         
+        return Bool(contentResponse) ?? false
+    }
+    
     func execute(task: Task, withContext context: String) async -> String {
-        let contextArray = await getContext(withQuery: yourgoal)
-        let context = contextArray.map({ "\n-----\n* TASK: \($0.metadata.taskName)\n* TASK RESULT: \($0.metadata.result)\n-----\n" }).joined()
+        let context = await getContext(withQuery: yourgoal)
         let messages: [OpenAIKit.Chat.Message] = [
             .system(content: "You are an AI who performs one task based on the following objective: \(yourgoal).\nTake into account these previously completed tasks and results: \(context)"),
             .user(content: "Your task: \(task.name)")
@@ -316,10 +358,16 @@ struct YourGoal: AsyncParsableCommand {
                 let vector = Vector(id: "\(task.id)", values: adaEmbedding, metadata: VectorMetadata(taskName: task.name, result: result))
                 await upsert(vector: vector)
                 
-                // Step 3: Create new tasks and reprioritize task list
-                let newTasks = await createNewTasks(withPreviousTask: task, previousResult: result)
-                taskList.append(contentsOf: newTasks)
-                taskList = await prioritizeTasks()
+                // Based on context, have we completed the objective
+                if await isGoalCompleted() {
+                    taskList = []
+                    print("\n*****GOAL ACHIEVED*****\n".green)
+                } else {
+                    // Step 3: Create new tasks and reprioritize task list
+                    let newTasks = await createNewTasks(withPreviousTask: task, previousResult: result)
+                    taskList.append(contentsOf: newTasks)
+                    taskList = await prioritizeTasks()
+                }
             }
         }
     }
