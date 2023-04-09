@@ -16,6 +16,12 @@ struct Vector: Codable {
     var metadata: VectorMetadata
 }
 
+struct VectorMatch: Codable {
+    var id: String
+    var score: Float
+    var metadata: VectorMetadata
+}
+
 struct Task: Codable {
     var id: String
     var name: String
@@ -104,7 +110,7 @@ struct YourGoal: AsyncParsableCommand {
     }
 
     // this too, i know.
-    func getContext(withQuery query: String) async -> [String] {
+    func getContext(withQuery query: String) async -> [VectorMatch] {
         let queryEmbedding = await getADAEmbedding(withText: query)
         
         struct PineconeQuery: Codable {
@@ -113,15 +119,9 @@ struct YourGoal: AsyncParsableCommand {
             var topK: Int
             var namespace: String
         }
-        
-        struct PineconeMatch: Codable {
-            var id: String
-            var score: Float
-            var metadata: VectorMetadata
-        }
-        
+                
         struct ResponseData: Codable {
-            let matches: [PineconeMatch]
+            let matches: [VectorMatch]
         }
         
         let query = PineconeQuery(vector: queryEmbedding, includeMetadata: true, topK: 5, namespace: namespaceUUID)
@@ -148,7 +148,7 @@ struct YourGoal: AsyncParsableCommand {
                 for match in responseData.matches {
                     debugLog("\(match.score): \(match.metadata.taskName)")
                 }
-                return sortedMatches.map { $0.metadata.taskName }
+                return sortedMatches
             }
         } catch let error {
             print("ERROR: \(error)")
@@ -247,9 +247,9 @@ struct YourGoal: AsyncParsableCommand {
         
     func execute(task: Task, withContext context: String) async -> String {
         let contextArray = await getContext(withQuery: yourgoal)
-        let context = contextArray.map({ "\n* \($0)" }).joined()
+        let context = contextArray.map({ "\n-----\n* TASK: \($0.metadata.taskName)\n* TASK RESULT: \($0.metadata.result)\n-----\n" }).joined()
         let messages: [OpenAIKit.Chat.Message] = [
-            .system(content: "You are an AI who performs one task based on the following objective: \(yourgoal).\nTake into account these previously completed tasks: \(context)"),
+            .system(content: "You are an AI who performs one task based on the following objective: \(yourgoal).\nTake into account these previously completed tasks and results: \(context)"),
             .user(content: "Your task: \(task.name)")
         ]
         debugLog("\n****TASK EXECUTE MESSAGE ARRAY****\n")
