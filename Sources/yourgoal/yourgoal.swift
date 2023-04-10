@@ -252,17 +252,15 @@ struct YourGoal: AsyncParsableCommand {
         }
         return newTasks
     }
+
     
     // This is based on the AI-Functions concept, check it out here: https://github.com/Torantulino/AI-Functions  (also the core of AutoGPT)
-    //
-    // Obviously very specific to the 'is completed' case, so maybe break this out to a more generic callAIFunction() call like in AutoGPT
-    func isGoalCompleted() async -> Bool {
-        let context = await getContext(withQuery: yourgoal, includeResults: false)
+    func callAIFunction(functionDesc: String, functionDef: String, parametersString: String) async -> String {
         let messages: [OpenAIKit.Chat.Message] = [
-            .system(content: "You are now the following Swift function: ```// Determines if the goal is completed by analyzing the context\nfunc isGoalCompleted(goal: String, context: String) -> Bool```\n\nOnly respond with your `return` value."),
-            .user(content: "goal parameter: ```\(yourgoal)```, context parameter: ```\(context)```")
+            .system(content: "You are now the following Swift function: ```// \(functionDesc)\n\(functionDef)```\n\nOnly respond with your `return` value."),
+            .user(content: parametersString)
         ]
-        debugLog("\n****IS GOAL COMPLETE MESSAGE ARRAY****\n")
+        debugLog("\n****CALL AI FUNCTION MESSAGE ARRAY****\n")
         debugLog(messages)
         var contentResponse = ""
         do {
@@ -285,10 +283,20 @@ struct YourGoal: AsyncParsableCommand {
         } catch let error {
             print(error)
         }
-        debugLog("\n****IS GOAL COMPLETE STRING RESULT****\n")
+        debugLog("\n****CALL AI FUNCITON STRING RESULT****\n")
         debugLog("\(contentResponse)")
         
-        return Bool(contentResponse) ?? false
+        return contentResponse
+    }
+    
+    func isGoalCompleted() async -> Bool {
+        let context = await getContext(withQuery: yourgoal, includeResults: false)
+        let aiFunctionStringResult = await callAIFunction(functionDesc: "Determines if the goal is completed by analyzing the context", functionDef: "func isGoalCompleted(goal: String, context: String) -> Bool", parametersString: "goal parameter: ```\(yourgoal)```, context parameter: ```\(context)```")
+        if let boolResult = Bool(aiFunctionStringResult) {
+            return boolResult
+        }
+        print("Error converting type for AI function: \(aiFunctionStringResult)".red)
+        return false
     }
     
     func execute(task: Task, withContext context: String) async -> String {
