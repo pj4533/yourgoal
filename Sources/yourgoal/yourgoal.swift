@@ -110,7 +110,7 @@ struct YourGoal: AsyncParsableCommand {
     }
 
     // this too, i know.
-    func getContext(withQuery query: String) async -> String {
+    func getContext(withQuery query: String, includeResults: Bool = true) async -> String {
         let queryEmbedding = await getADAEmbedding(withText: query)
         
         struct PineconeQuery: Codable {
@@ -148,8 +148,11 @@ struct YourGoal: AsyncParsableCommand {
                 for match in responseData.matches {
                     debugLog("\(match.score): \(match.metadata.taskName)")
                 }
-                let context = sortedMatches.map({ "\n-----\n* TASK: \($0.metadata.taskName)\n* TASK RESULT: \($0.metadata.result)\n-----\n" }).joined()
-                return context
+                if includeResults {
+                    return sortedMatches.map({ "\n-----\n* TASK: \($0.metadata.taskName)\n* TASK RESULT: \($0.metadata.result)\n-----\n" }).joined()
+                } else {
+                    return "COMPLETED TASKS:\n\(sortedMatches.map({ "* \($0.metadata.taskName)\n" }).joined())"
+                }
             }
         } catch let error {
             print("ERROR: \(error)")
@@ -254,10 +257,10 @@ struct YourGoal: AsyncParsableCommand {
     //
     // Obviously very specific to the 'is completed' case, so maybe break this out to a more generic callAIFunction() call like in AutoGPT
     func isGoalCompleted() async -> Bool {
-        let context = await getContext(withQuery: yourgoal)
+        let context = await getContext(withQuery: yourgoal, includeResults: false)
         let messages: [OpenAIKit.Chat.Message] = [
             .system(content: "You are now the following Swift function: ```// Determines if the goal is completed by analyzing the context\nfunc isGoalCompleted(goal: String, context: String) -> Bool```\n\nOnly respond with your `return` value."),
-            .user(content: "goal parameter: \(yourgoal), context parameter: \(context)")
+            .user(content: "goal parameter: ```\(yourgoal)```, context parameter: ```\(context)```")
         ]
         debugLog("\n****IS GOAL COMPLETE MESSAGE ARRAY****\n")
         debugLog(messages)
