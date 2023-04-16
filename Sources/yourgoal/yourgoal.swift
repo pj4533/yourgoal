@@ -77,7 +77,7 @@ struct YourGoal: AsyncParsableCommand {
     // This is based on the AI-Functions concept, check it out here: https://github.com/Torantulino/AI-Functions  (also the core of AutoGPT)
     func callAIFunction(functionDesc: String, functionDef: String, parametersString: String) async -> String {
         DebugLog.shared.log("\n****CALL AI FUNCTION COMPLETION****\n")
-        let completion = await OpenAIClient.shared.getCompletion(withPrompt: "You are now the following Swift function: ```// \(functionDesc)\n\(functionDef)```\n\nOnly respond with your `return` value.\n\n\(parametersString)", temperature: 0.0, maxTokens: 100)
+        let completion = await OpenAIClient.shared.getCompletion(withPrompt: "You are now the following Swift function: ```// \(functionDesc)\n\(functionDef)```\n\nOnly respond with your `return` value.\n\n\(parametersString)")
         DebugLog.shared.log("\n****CALL AI FUNCITON STRING RESULT****\n")
         DebugLog.shared.log(completion)
         return completion
@@ -96,7 +96,7 @@ struct YourGoal: AsyncParsableCommand {
     func execute(task: Task, withContext context: String) async -> String {
         let context = await getContext(withQuery: yourgoal)
         DebugLog.shared.log("\n****TASK EXECUTE COMPLETION****\n")
-        let completion = await OpenAIClient.shared.getCompletion(withPrompt: "You are an AI who performs one task based on the following objective: \(yourgoal).\nTake into account these previously completed tasks and results: \(context)\n\nYour task: \(task.name)", temperature: 0.7, maxTokens: 2000)
+        let completion = await OpenAIClient.shared.getCompletion(withPrompt: "You are an AI who performs one task based on the following objective: \(yourgoal).\nTake into account these previously completed tasks and results: \(context)\n\nYour task: \(task.name)")
         return completion
     }
     

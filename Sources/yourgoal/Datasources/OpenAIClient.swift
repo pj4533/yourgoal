@@ -54,7 +54,7 @@ class OpenAIClient: EmbeddingSource, LLMSource {
         return await self.getCompletion(withPrompt: prompt, temperature: 0.5, maxTokens: 500)
     }
     
-    func getCompletion(withPrompt prompt: String, temperature: Double, maxTokens: Int) async -> String {
+    private func getCompletion(withPrompt prompt: String, temperature: Double, maxTokens: Int) async -> String {
         let messages: [OpenAIKit.Chat.Message] = [
             .system(content: prompt)
         ]
