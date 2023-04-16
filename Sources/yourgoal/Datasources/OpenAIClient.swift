@@ -9,11 +9,11 @@ import Foundation
 import OpenAIKit
 import AsyncHTTPClient
 
-class OpenAIClient: EmbeddingSource, LLMSource {
+class OpenAIClient {
     private static var _shared: OpenAIClient?
     private let apiKey: String
     private let organization: String
-    private var openAIClient: OpenAIKit.Client?
+    internal var openAIClient: OpenAIKit.Client?
     private let httpClient = HTTPClient(eventLoopGroupProvider: .createNew)
     
     private init(apiKey: String, organization: String) {
@@ -38,23 +38,8 @@ class OpenAIClient: EmbeddingSource, LLMSource {
         }
         _shared = OpenAIClient(apiKey: apiKey, organization: organization)
     }
-    
-    func getEmbedding(withText text: String) async -> [Float] {
-        let singleLineText = text.replacingOccurrences(of: "\n", with: " ")
-        do {
-            let response = try await self.openAIClient?.embeddings.create(input: singleLineText)
-            return response?.data.first?.embedding ?? []
-        } catch let error {
-            print(error)
-        }
-        return []
-    }
-
-    func getCompletion(withPrompt prompt: String) async -> String {
-        return await self.getCompletion(withPrompt: prompt, temperature: 0.5, maxTokens: 500)
-    }
-    
-    private func getCompletion(withPrompt prompt: String, temperature: Double, maxTokens: Int) async -> String {
+        
+    internal func getCompletion(withPrompt prompt: String, temperature: Double, maxTokens: Int) async -> String {
         let messages: [OpenAIKit.Chat.Message] = [
             .system(content: prompt)
         ]

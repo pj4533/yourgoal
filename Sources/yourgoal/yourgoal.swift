@@ -1,6 +1,8 @@
 import Foundation
 import ArgumentParser
 
+var llmSource: LLMSource?
+
 @main
 struct YourGoal: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
@@ -13,6 +15,9 @@ struct YourGoal: AsyncParsableCommand {
 
     @Flag(help: "Debug Mode")
     var debug: Bool = false
+
+    @Flag(help: "Local LLM Mode")
+    var local: Bool = false
 
     var apiKey: String {
         ProcessInfo.processInfo.environment["OPENAI_API_KEY"]!
@@ -30,44 +35,46 @@ struct YourGoal: AsyncParsableCommand {
         ProcessInfo.processInfo.environment["PINECONE_BASE_URL"]!
     }
 
-    var taskList: [Task] = []
+    var taskList: [LLMTask] = []
     var namespaceUUID: String = UUID().uuidString
-            
+        
     func getContext(withQuery query: String, includeResults: Bool = true) async -> String {
         let queryEmbedding = await OpenAIClient.shared.getEmbedding(withText: query)
         let vectorDB = PineconeVectorDatabase(apiKey: self.pineconeAPIKey, baseURL: self.pineconeBaseURL, namespace: self.namespaceUUID)
         return await vectorDB.query(embedding: queryEmbedding, includeResults: includeResults)
     }
 
-    func prioritizeTasks() async -> [Task] {
+    func prioritizeTasks() async -> [LLMTask] {
         DebugLog.shared.log("\n****PRIORITIZE TASKS COMPLETION*****\n")
-        let completion = await OpenAIClient.shared.getCompletion(withPrompt: "You are an task prioritization AI tasked with cleaning the formatting and reprioritizing tasks. Consider the ultimate objective of your team: \(yourgoal). Do not remove any tasks. Return the result as an ordered bulleted list using a '* ' at the beginning of each line.\n\nClean, format and reprioritize these tasks: \(taskList.map({$0.name}).joined(separator: ", ")).")
-        var prioritizedTasks: [Task] = []
-        DebugLog.shared.log("\n****PRIORITIZE TASKS RESULT****\n")
-        DebugLog.shared.log(completion)
-        let lines = completion.split(separator: "\n")
-        for line in lines {
-            let taskComponents = line.components(separatedBy: "* ")
-            if let taskName = taskComponents.last {
-                let newTask = Task(id: UUID().uuidString, name: String(taskName))
-                prioritizedTasks.append(newTask)
+        var prioritizedTasks: [LLMTask] = []
+        if let completion = try! await llmSource?.getCompletion(withPrompt: "You are an task prioritization AI tasked with cleaning the formatting and reprioritizing tasks. Consider the ultimate objective of your team: \(yourgoal). Do not remove any tasks. Return the result as an ordered bulleted list using a '* ' at the beginning of each line.\n\nClean, format and reprioritize these tasks: \(taskList.map({$0.name}).joined(separator: ", ")).") {
+            DebugLog.shared.log("\n****PRIORITIZE TASKS RESULT****\n")
+            DebugLog.shared.log(completion)
+            let lines = completion.split(separator: "\n")
+            for line in lines {
+                let taskComponents = line.components(separatedBy: "* ")
+                if let taskName = taskComponents.last {
+                    let newTask = LLMTask(id: UUID().uuidString, name: String(taskName))
+                    prioritizedTasks.append(newTask)
+                }
             }
         }
         return prioritizedTasks
     }
     
-    mutating func createNewTasks(withPreviousTask previousTask: Task, previousResult: String) async -> [Task] {
+    mutating func createNewTasks(withPreviousTask previousTask: LLMTask, previousResult: String) async -> [LLMTask] {
         DebugLog.shared.log("\n****CREATE NEW TASKS COMPLETION****\n")
-        let completion = await OpenAIClient.shared.getCompletion(withPrompt: "You are an task creation AI that uses the result of an execution agent to create new tasks with the following objective: \(yourgoal), The last completed task has the result: \(previousResult). This result was based on this task description: \(previousTask.name). These are incomplete tasks: \(taskList.map({$0.name}).joined(separator: ", ")).\n\nBased on the previous result, create new tasks to be completed by the AI system that do not overlap with incomplete tasks. Each line containing a task should start with '-- '")
-        var newTasks: [Task] = []
-        DebugLog.shared.log("\n****CREATE NEW TASKS RESULT****\n")
-        DebugLog.shared.log(completion)
-        let newTaskStrings = completion.split(separator: "\n")
-        for taskString in newTaskStrings {
-            if taskString.hasPrefix("-- ") {
-                if let newTaskString = taskString.components(separatedBy: "-- ").last {
-                    let newTask = Task(id: UUID().uuidString, name: String(newTaskString))
-                    newTasks.append(newTask)
+        var newTasks: [LLMTask] = []
+        if let completion = try! await llmSource?.getCompletion(withPrompt: "You are an task creation AI that uses the result of an execution agent to create new tasks with the following objective: \(yourgoal), The last completed task has the result: \(previousResult). This result was based on this task description: \(previousTask.name). These are incomplete tasks: \(taskList.map({$0.name}).joined(separator: ", ")).\n\nBased on the previous result, create new tasks to be completed by the AI system that do not overlap with incomplete tasks. Each line containing a task should start with '-- '") {
+            DebugLog.shared.log("\n****CREATE NEW TASKS RESULT****\n")
+            DebugLog.shared.log(completion)
+            let newTaskStrings = completion.split(separator: "\n")
+            for taskString in newTaskStrings {
+                if taskString.hasPrefix("-- ") {
+                    if let newTaskString = taskString.components(separatedBy: "-- ").last {
+                        let newTask = LLMTask(id: UUID().uuidString, name: String(newTaskString))
+                        newTasks.append(newTask)
+                    }
                 }
             }
         }
@@ -77,10 +84,12 @@ struct YourGoal: AsyncParsableCommand {
     // This is based on the AI-Functions concept, check it out here: https://github.com/Torantulino/AI-Functions  (also the core of AutoGPT)
     func callAIFunction(functionDesc: String, functionDef: String, parametersString: String) async -> String {
         DebugLog.shared.log("\n****CALL AI FUNCTION COMPLETION****\n")
-        let completion = await OpenAIClient.shared.getCompletion(withPrompt: "You are now the following Swift function: ```// \(functionDesc)\n\(functionDef)```\n\nOnly respond with your `return` value.\n\n\(parametersString)")
-        DebugLog.shared.log("\n****CALL AI FUNCITON STRING RESULT****\n")
-        DebugLog.shared.log(completion)
-        return completion
+        if let text = try! await llmSource?.getCompletion(withPrompt: "You are now the following Swift function: ```// \(functionDesc)\n\(functionDef)```\n\nOnly respond with your `return` value.\n\n\(parametersString)") {
+            DebugLog.shared.log("\n****CALL AI FUNCITON STRING RESULT****\n")
+            DebugLog.shared.log(text)
+            return text
+        }
+        return ""
     }
     
     func isGoalCompleted() async -> Bool {
@@ -93,21 +102,27 @@ struct YourGoal: AsyncParsableCommand {
         return false
     }
     
-    func execute(task: Task, withContext context: String) async -> String {
+    func execute(task: LLMTask, withContext context: String) async -> String {
         let context = await getContext(withQuery: yourgoal)
         DebugLog.shared.log("\n****TASK EXECUTE COMPLETION****\n")
-        let completion = await OpenAIClient.shared.getCompletion(withPrompt: "You are an AI who performs one task based on the following objective: \(yourgoal).\nTake into account these previously completed tasks and results: \(context)\n\nYour task: \(task.name)")
-        return completion
+        return try! await llmSource?.getCompletion(withPrompt: "You are an AI who performs one task based on the following objective: \(yourgoal).\nTake into account these previously completed tasks and results: \(context)\n\nYour task: \(task.name)") ?? ""
     }
     
 	mutating func run() async throws {
         DebugLog.shared.debug = self.debug
         OpenAIClient.initialize(apiKey: self.apiKey, organization: self.organization)
         
+        if self.local {
+            try! await GPT4AllClient.initialize(model: "gpt4all-lora-unfiltered-quantized")
+            llmSource = GPT4AllClient.shared
+        } else {
+            llmSource = OpenAIClient.shared
+        }
+        
         print("\n*****OBJECTIVE*****\n".lightBlue)
         print("\(yourgoal)")
 
-        let firstTask = Task(id: UUID().uuidString, name: "Develop a task list")
+        let firstTask = LLMTask(id: UUID().uuidString, name: "Develop a task list")
         taskList.append(firstTask)
         
         while taskList.count > 0 {

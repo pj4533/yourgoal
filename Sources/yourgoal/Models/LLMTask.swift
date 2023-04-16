@@ -1,5 +1,5 @@
 //
-//  Task.swift
+//  LLMTask.swift
 //  
 //
 //  Created by PJ Gray on 4/16/23.
@@ -7,7 +7,7 @@
 
 import Foundation
 
-struct Task: Codable {
+struct LLMTask: Codable {
     var id: String
     var name: String
 }
