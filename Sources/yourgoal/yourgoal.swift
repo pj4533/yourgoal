@@ -41,7 +41,7 @@ struct YourGoal: AsyncParsableCommand {
 
     func prioritizeTasks() async -> [Task] {
         DebugLog.shared.log("\n****PRIORITIZE TASKS COMPLETION*****\n")
-        let completion = await OpenAIClient.shared.getCompletion(withSystemMessage:  "You are an task prioritization AI tasked with cleaning the formatting and reprioritizing tasks. Consider the ultimate objective of your team: \(yourgoal). Do not remove any tasks. Return the result as an ordered bulleted list using a '* ' at the beginning of each line.", userMessage: "Clean, format and reprioritize these tasks: \(taskList.map({$0.name}).joined(separator: ", ")).")
+        let completion = await OpenAIClient.shared.getCompletion(withPrompt: "You are an task prioritization AI tasked with cleaning the formatting and reprioritizing tasks. Consider the ultimate objective of your team: \(yourgoal). Do not remove any tasks. Return the result as an ordered bulleted list using a '* ' at the beginning of each line.\n\nClean, format and reprioritize these tasks: \(taskList.map({$0.name}).joined(separator: ", ")).")
         var prioritizedTasks: [Task] = []
         DebugLog.shared.log("\n****PRIORITIZE TASKS RESULT****\n")
         DebugLog.shared.log(completion)
@@ -58,7 +58,7 @@ struct YourGoal: AsyncParsableCommand {
     
     mutating func createNewTasks(withPreviousTask previousTask: Task, previousResult: String) async -> [Task] {
         DebugLog.shared.log("\n****CREATE NEW TASKS COMPLETION****\n")
-        let completion = await OpenAIClient.shared.getCompletion(withSystemMessage: "You are an task creation AI that uses the result of an execution agent to create new tasks with the following objective: \(yourgoal), The last completed task has the result: \(previousResult). This result was based on this task description: \(previousTask.name). These are incomplete tasks: \(taskList.map({$0.name}).joined(separator: ", ")).", userMessage: "Based on the previous result, create new tasks to be completed by the AI system that do not overlap with incomplete tasks. Each line containing a task should start with '-- '")
+        let completion = await OpenAIClient.shared.getCompletion(withPrompt: "You are an task creation AI that uses the result of an execution agent to create new tasks with the following objective: \(yourgoal), The last completed task has the result: \(previousResult). This result was based on this task description: \(previousTask.name). These are incomplete tasks: \(taskList.map({$0.name}).joined(separator: ", ")).\n\nBased on the previous result, create new tasks to be completed by the AI system that do not overlap with incomplete tasks. Each line containing a task should start with '-- '")
         var newTasks: [Task] = []
         DebugLog.shared.log("\n****CREATE NEW TASKS RESULT****\n")
         DebugLog.shared.log(completion)
@@ -77,7 +77,7 @@ struct YourGoal: AsyncParsableCommand {
     // This is based on the AI-Functions concept, check it out here: https://github.com/Torantulino/AI-Functions  (also the core of AutoGPT)
     func callAIFunction(functionDesc: String, functionDef: String, parametersString: String) async -> String {
         DebugLog.shared.log("\n****CALL AI FUNCTION COMPLETION****\n")
-        let completion = await OpenAIClient.shared.getCompletion(withSystemMessage: "You are now the following Swift function: ```// \(functionDesc)\n\(functionDef)```\n\nOnly respond with your `return` value.", userMessage: parametersString, temperature: 0.0, maxTokens: 100)
+        let completion = await OpenAIClient.shared.getCompletion(withPrompt: "You are now the following Swift function: ```// \(functionDesc)\n\(functionDef)```\n\nOnly respond with your `return` value.\n\n\(parametersString)", temperature: 0.0, maxTokens: 100)
         DebugLog.shared.log("\n****CALL AI FUNCITON STRING RESULT****\n")
         DebugLog.shared.log(completion)
         return completion
@@ -96,7 +96,7 @@ struct YourGoal: AsyncParsableCommand {
     func execute(task: Task, withContext context: String) async -> String {
         let context = await getContext(withQuery: yourgoal)
         DebugLog.shared.log("\n****TASK EXECUTE COMPLETION****\n")
-        let completion = await OpenAIClient.shared.getCompletion(withSystemMessage: "You are an AI who performs one task based on the following objective: \(yourgoal).\nTake into account these previously completed tasks and results: \(context)", userMessage: "Your task: \(task.name)", temperature: 0.7, maxTokens: 2000)
+        let completion = await OpenAIClient.shared.getCompletion(withPrompt: "You are an AI who performs one task based on the following objective: \(yourgoal).\nTake into account these previously completed tasks and results: \(context)\n\nYour task: \(task.name)", temperature: 0.7, maxTokens: 2000)
         return completion
     }
     

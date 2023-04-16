@@ -8,5 +8,5 @@
 import Foundation
 
 protocol LLMSource {
-    func getCompletion(withSystemMessage systemMessage: String, userMessage: String) async -> String
+    func getCompletion(withPrompt prompt: String) async -> String
 }

@@ -50,14 +50,13 @@ class OpenAIClient: EmbeddingSource, LLMSource {
         return []
     }
 
-    func getCompletion(withSystemMessage systemMessage: String, userMessage: String) async -> String {
-        return await self.getCompletion(withSystemMessage: systemMessage, userMessage: userMessage, temperature: 0.5, maxTokens: 500)
+    func getCompletion(withPrompt prompt: String) async -> String {
+        return await self.getCompletion(withPrompt: prompt, temperature: 0.5, maxTokens: 500)
     }
     
-    func getCompletion(withSystemMessage systemMessage: String, userMessage: String, temperature: Double, maxTokens: Int) async -> String {
+    func getCompletion(withPrompt prompt: String, temperature: Double, maxTokens: Int) async -> String {
         let messages: [OpenAIKit.Chat.Message] = [
-            .system(content: systemMessage),
-            .user(content: userMessage)
+            .system(content: prompt)
         ]
         DebugLog.shared.log(messages)
         var assisantResponse = ""
