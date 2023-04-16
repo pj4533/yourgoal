@@ -36,106 +36,11 @@ struct YourGoal: AsyncParsableCommand {
 
     var taskList: [Task] = []
     var namespaceUUID: String = UUID().uuidString
-        
-    func debugLog(_ messages: [OpenAIKit.Chat.Message]) {
-        if debug {
-            for message in messages {
-                switch message {
-                case .assistant(let content):
-                    print("(ASSISTANT) \(content)".brightWhite)
-                case .user(let content):
-                    print("(USER) \(content)".brightWhite)
-                case .system(let content):
-                    print("(SYSTEM) \(content)".brightWhite)
-                }
-            }
-        }
-    }
-    
-    func debugLog(_ message: String) {
-        if debug { print("\(message)".brightWhite) }
-    }
-
-    // I know, I know, I'm going to refactor this. Geeze, relax.
-    func upsert(vector: Vector) async {
-        struct PineconeUpsert: Codable {
-            var vectors: [Vector]
-            var namespace: String
-        }
-        
-        struct ResponseData: Codable {
-            let result: String
-        }
-        
-        let upsert = PineconeUpsert(vectors: [vector], namespace: namespaceUUID)
-        do {
-            if let url = URL(string: "https://\(pineconeBaseURL)/vectors/upsert") {
-                var request = URLRequest(url: url)
-                request.httpMethod = "POST"
-                request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-                request.setValue("application/json", forHTTPHeaderField: "accept")
-                request.setValue(pineconeAPIKey, forHTTPHeaderField: "Api-Key")
-
-                let encoder = JSONEncoder()
-                let jsonData = try encoder.encode(upsert)
-                request.httpBody = jsonData
-                
-                let (_, _) = try await URLSession.shared.data(for: request)
-            }
-        } catch let error {
-            print("ERROR: \(error)")
-        }
-    }
-
-    // this too, i know.
+            
     func getContext(withQuery query: String, includeResults: Bool = true) async -> String {
         let queryEmbedding = await getADAEmbedding(withText: query)
-        
-        struct PineconeQuery: Codable {
-            var vector: [Float]
-            var includeMetadata: Bool
-            var topK: Int
-            var namespace: String
-        }
-                
-        struct ResponseData: Codable {
-            let matches: [VectorMatch]
-        }
-        
-        let query = PineconeQuery(vector: queryEmbedding, includeMetadata: true, topK: 5, namespace: namespaceUUID)
-        do {
-            if let url = URL(string: "https://\(pineconeBaseURL)/query") {
-                var request = URLRequest(url: url)
-                request.httpMethod = "POST"
-                request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-                request.setValue("application/json", forHTTPHeaderField: "accept")
-                request.setValue(pineconeAPIKey, forHTTPHeaderField: "Api-Key")
-
-                let encoder = JSONEncoder()
-                let jsonData = try encoder.encode(query)
-                request.httpBody = jsonData
-                
-                let (data, _) = try await URLSession.shared.data(for: request)
-                
-                let decoder = JSONDecoder()
-                let responseData = try decoder.decode(ResponseData.self, from: data)
-                let sortedMatches = responseData.matches.sorted { match1, match2 in
-                    return match1.score > match2.score
-                }
-                debugLog("\n*****MATCHES*****\n")
-                for match in responseData.matches {
-                    debugLog("\(match.score): \(match.metadata.taskName)")
-                }
-                if includeResults {
-                    return sortedMatches.map({ "\n-----\n* TASK: \($0.metadata.taskName)\n* TASK RESULT: \($0.metadata.result)\n-----\n" }).joined()
-                } else {
-                    return "COMPLETED TASKS:\n\(sortedMatches.map({ "* \($0.metadata.taskName)\n" }).joined())"
-                }
-            }
-        } catch let error {
-            print("ERROR: \(error)")
-        }
-        return ""
+        let vectorDB = PineconeVectorDatabase(apiKey: self.pineconeAPIKey, baseURL: self.pineconeBaseURL, namespace: self.namespaceUUID)
+        return await vectorDB.query(embedding: queryEmbedding, includeResults: includeResults)
     }
 
     func getADAEmbedding(withText text: String) async -> [Float] {
@@ -154,8 +59,8 @@ struct YourGoal: AsyncParsableCommand {
             .system(content: "You are an task prioritization AI tasked with cleaning the formatting and reprioritizing tasks. Consider the ultimate objective of your team: \(yourgoal). Do not remove any tasks. Return the result as an ordered bulleted list using a '* ' at the beginning of each line."),
             .user(content: "Clean, format and reprioritize these tasks: \(taskList.map({$0.name}).joined(separator: ", ")).")
         ]
-        debugLog("\n****PRIORITIZE TASKS MESSAGE ARRAY****\n")
-        debugLog(messages)
+        DebugLog.shared.log("\n****PRIORITIZE TASKS MESSAGE ARRAY****\n")
+        DebugLog.shared.log(messages)
         var prioritizedTasks: [Task] = []
         do {
             let completion = try await openAIClient?.chats.create(
@@ -166,8 +71,8 @@ struct YourGoal: AsyncParsableCommand {
             )
             switch completion?.choices.first?.message {
             case .assistant(let content):
-                debugLog("\n****PRIORITIZE TASKS RESULT****\n")
-                debugLog(content)
+                DebugLog.shared.log("\n****PRIORITIZE TASKS RESULT****\n")
+                DebugLog.shared.log(content)
                 let lines = content.split(separator: "\n")
                 for line in lines {
                     let taskComponents = line.components(separatedBy: "* ")
@@ -195,8 +100,8 @@ struct YourGoal: AsyncParsableCommand {
             .system(content: "You are an task creation AI that uses the result of an execution agent to create new tasks with the following objective: \(yourgoal), The last completed task has the result: \(previousResult). This result was based on this task description: \(previousTask.name). These are incomplete tasks: \(taskList.map({$0.name}).joined(separator: ", "))."),
             .user(content: "Based on the previous result, create new tasks to be completed by the AI system that do not overlap with incomplete tasks. Each line containing a task should start with '-- '")
         ]
-        debugLog("\n****CREATE NEW TASKS MESSAGE ARRAY****\n")
-        debugLog(messages)
+        DebugLog.shared.log("\n****CREATE NEW TASKS MESSAGE ARRAY****\n")
+        DebugLog.shared.log(messages)
         var newTasks: [Task] = []
         do {
             let completion = try await openAIClient?.chats.create(
@@ -207,8 +112,8 @@ struct YourGoal: AsyncParsableCommand {
             )
             switch completion?.choices.first?.message {
             case .assistant(let content):
-                debugLog("\n****CREATE NEW TASKS RESULT****\n")
-                debugLog(content)
+                DebugLog.shared.log("\n****CREATE NEW TASKS RESULT****\n")
+                DebugLog.shared.log(content)
                 let newTaskStrings = content.split(separator: "\n")
                 for taskString in newTaskStrings {
                     if taskString.hasPrefix("-- ") {
@@ -238,8 +143,8 @@ struct YourGoal: AsyncParsableCommand {
             .system(content: "You are now the following Swift function: ```// \(functionDesc)\n\(functionDef)```\n\nOnly respond with your `return` value."),
             .user(content: parametersString)
         ]
-        debugLog("\n****CALL AI FUNCTION MESSAGE ARRAY****\n")
-        debugLog(messages)
+        DebugLog.shared.log("\n****CALL AI FUNCTION MESSAGE ARRAY****\n")
+        DebugLog.shared.log(messages)
         var contentResponse = ""
         do {
             let completion = try await openAIClient?.chats.create(
@@ -261,8 +166,8 @@ struct YourGoal: AsyncParsableCommand {
         } catch let error {
             print(error)
         }
-        debugLog("\n****CALL AI FUNCITON STRING RESULT****\n")
-        debugLog("\(contentResponse)")
+        DebugLog.shared.log("\n****CALL AI FUNCITON STRING RESULT****\n")
+        DebugLog.shared.log("\(contentResponse)")
         
         return contentResponse
     }
@@ -283,8 +188,8 @@ struct YourGoal: AsyncParsableCommand {
             .system(content: "You are an AI who performs one task based on the following objective: \(yourgoal).\nTake into account these previously completed tasks and results: \(context)"),
             .user(content: "Your task: \(task.name)")
         ]
-        debugLog("\n****TASK EXECUTE MESSAGE ARRAY****\n")
-        debugLog(messages)
+        DebugLog.shared.log("\n****TASK EXECUTE MESSAGE ARRAY****\n")
+        DebugLog.shared.log(messages)
         var contentResponse = ""
         do {
             let completion = try await openAIClient?.chats.create(
@@ -310,6 +215,8 @@ struct YourGoal: AsyncParsableCommand {
     }
     
 	mutating func run() async throws {
+        DebugLog.shared.debug = self.debug
+        
         print("\n*****OBJECTIVE*****\n".lightBlue)
         print("\(yourgoal)")
 
@@ -345,7 +252,8 @@ struct YourGoal: AsyncParsableCommand {
                 let enrichedResult = result // not even sure what "enriched" is...need to look that up -- prob something in the original project?
                 let adaEmbedding = await getADAEmbedding(withText: enrichedResult)
                 let vector = Vector(id: "\(task.id)", values: adaEmbedding, metadata: VectorMetadata(taskName: task.name, result: result))
-                await upsert(vector: vector)
+                let vectorDB = PineconeVectorDatabase(apiKey: self.pineconeAPIKey, baseURL: self.pineconeBaseURL, namespace: self.namespaceUUID)
+                await vectorDB.upsert(vector: vector)
                 
                 // Based on context, have we completed the objective
                 if await isGoalCompleted() {

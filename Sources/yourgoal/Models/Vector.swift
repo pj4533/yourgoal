@@ -9,6 +9,6 @@ import Foundation
 
 struct Vector: Codable {
     var id: String
-    var values: [Float]
+    var values: Embedding
     var metadata: VectorMetadata
 }
