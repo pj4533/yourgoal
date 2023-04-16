@@ -5,28 +5,6 @@ import OpenAIKit
 
 var openAIClient: OpenAIKit.Client?
 
-struct VectorMetadata: Codable {
-    var taskName: String
-    var result: String
-}
-
-struct Vector: Codable {
-    var id: String
-    var values: [Float]
-    var metadata: VectorMetadata
-}
-
-struct VectorMatch: Codable {
-    var id: String
-    var score: Float
-    var metadata: VectorMetadata
-}
-
-struct Task: Codable {
-    var id: String
-    var name: String
-}
-
 @main
 struct YourGoal: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
