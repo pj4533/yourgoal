@@ -1,8 +1,6 @@
 # yourgoal
 
-Swift implementation of [BabyAGI](https://github.com/yoheinakajima/babyagi)
-
-This is a Swift port of BabyAGI, an example of an AI-powered task management system that uses OpenAI and Pinecone APIs to create, prioritize, and execute tasks. The main idea behind this system is that it creates tasks based on the result of previous tasks and a predefined objective.
+This is a Swift port of [BabyAGI](https://github.com/yoheinakajima/babyagi), an example of an AI-powered task management system that uses OpenAI and Pinecone APIs to create, prioritize, and execute tasks. The main idea behind this system is that it creates tasks based on the result of previous tasks and a predefined objective.
 
 ![example output](yourgoal1.gif)
 
